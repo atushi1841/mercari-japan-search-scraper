@@ -124,15 +124,8 @@ async def _run(user_input: dict) -> None:
 
             capture_q: asyncio.Queue = asyncio.Queue()
 
-            async def on_console(msg):
-                if use_actor:
-                    Actor.log.info(f"[console] {msg.type}: {msg.text}")
-                else:
-                    print(f"[console] {msg.type}: {msg.text}")
-            page.on("console", lambda msg: asyncio.create_task(on_console(msg)))
-
             async def on_request(req):
-                if "api.mercari.jp" in req.url:
+                if SEARCH_API_MARKER in req.url:
                     if use_actor:
                         Actor.log.info(f"[request] {req.method} {req.url}")
                     else:
@@ -176,9 +169,10 @@ async def _run(user_input: dict) -> None:
                 else:
                     print(f"[INFO] Fetching page {page_no}: {url[:120]}")
 
-                # Navigate using full page load (page.goto) for every page
-                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-                # Wait for the first search API response, then drain extras
+                if page_no == 1:
+                    # First page: full browser load to obtain initial search session
+                    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+
                 page_items = []
                 try:
                     first = await asyncio.wait_for(capture_q.get(), timeout=30)
@@ -188,36 +182,16 @@ async def _run(user_input: dict) -> None:
                     page_items.extend(await drain(capture_q, timeout=3.0))
                 except asyncio.TimeoutError:
                     if use_actor:
-                        Actor.log.warning(f"No search API response on page {page_no}; trying scroll...")
+                        Actor.log.warning(f"No search API response on page {page_no}")
+                        try:
+                            item_count = await page.evaluate("document.querySelectorAll(\"a[href*='/item/']\").length")
+                            current_href = await page.evaluate("location.href")
+                            Actor.log.warning(f"Page {page_no} items (SSR)={item_count} href={current_href}")
+                        except Exception as e:
+                            Actor.log.warning(f"Could not get SSR info: {e}")
                     else:
-                        print(f"[WARN] No search API response on page {page_no}; trying scroll...")
-                    try:
-                        for _ in range(3):
-                            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                            await asyncio.sleep(0.5)
-                    except Exception as e:
-                        if use_actor:
-                            Actor.log.warning(f"Scroll failed: {e}")
-                        else:
-                            print(f"[WARN] Scroll failed: {e}")
-                    try:
-                        first = await asyncio.wait_for(capture_q.get(), timeout=10)
-                        page_items.extend(
-                            _item_to_output(it) for it in (first.get("items") or []) if it.get("id")
-                        )
-                        page_items.extend(await drain(capture_q, timeout=3.0))
-                    except asyncio.TimeoutError:
-                        if use_actor:
-                            Actor.log.warning(f"No search API response after scroll on page {page_no}")
-                            try:
-                                item_count = await page.evaluate("document.querySelectorAll(\"a[href*='/item/']\").length")
-                                current_href = await page.evaluate("location.href")
-                                Actor.log.warning(f"Page {page_no} items (SSR)={item_count} href={current_href}")
-                            except Exception as e:
-                                Actor.log.warning(f"Could not get SSR info: {e}")
-                        else:
-                            print(f"[WARN] No search API response after scroll on page {page_no}")
-                        break
+                        print(f"[WARN] No search API response on page {page_no}")
+                    break
 
                 for item in page_items:
                     if collected >= max_items:
@@ -231,21 +205,32 @@ async def _run(user_input: dict) -> None:
                 if collected >= max_items or page_no >= max_pages:
                     break
 
-                # Find next page link (次へ) to follow pagination
-                next_url = await page.evaluate(
-                    """() => {
-                        const anchors = [...document.querySelectorAll('a')];
-                        const n = anchors.find(a => (a.textContent || '').trim() === '次へ');
-                        return n ? n.href : null;
-                    }"""
-                )
-                if not next_url:
+                # Click the "次へ" link for SPA-based navigation
+                next_loc = page.locator("a:has-text(\"次へ\")")
+                try:
+                    # ensure the link is visible (virtual list may place it lower)
+                    await next_loc.scroll_into_view_if_needed()
+                    await next_loc.click()
+                except Exception as e:
                     if use_actor:
-                        Actor.log.info("No 'next' link found; pagination ended")
+                        Actor.log.info(f"No 'next' link found or click failed: {e}")
                     else:
-                        print("[INFO] No 'next' link found; pagination ended")
+                        print(f"[INFO] No 'next' link found or click failed: {e}")
                     break
-                url = next_url
+
+                # Allow the SPA transition to finish (short timeout, ignore failures)
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=5000)
+                except Exception:
+                    pass
+
+                # Log SPA transition results for debugging
+                if use_actor:
+                    try:
+                        card_count = await page.evaluate("document.querySelectorAll(\"a[href*='/item/']\").length")
+                        Actor.log.info(f"After click: url={page.url}, card_count={card_count}")
+                    except Exception as e:
+                        Actor.log.warning(f"Failed to get after-click debug info: {e}")
 
             if use_actor:
                 Actor.log.info(f"Done. Collected {collected} items from {page_no} page(s).")
