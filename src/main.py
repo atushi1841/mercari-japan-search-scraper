@@ -15,6 +15,7 @@ capture the same way.
 import asyncio
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
@@ -103,6 +104,9 @@ async def _run(user_input: dict) -> None:
             proxy_url = await proxy_cfg.new_url()
             Actor.log.info(f"Using Apify proxy: {proxy_url[:40]}...")
 
+    start_time = time.monotonic()
+    timeout_guard_seconds = 600 * 0.9  # 90% of actor timeout (600s)
+
     browser = None
     try:
         async with async_playwright() as pw:
@@ -163,6 +167,13 @@ async def _run(user_input: dict) -> None:
                 return items
 
             while collected < max_items and page_no < max_pages:
+                elapsed = time.monotonic() - start_time
+                if elapsed > timeout_guard_seconds:
+                    if use_actor:
+                        Actor.log.info(f"Overall timeout guard hit after {elapsed:.1f}s, breaking loop")
+                    else:
+                        print(f"[INFO] Overall timeout guard hit after {elapsed:.1f}s, breaking loop")
+                    break
                 page_no += 1
                 if use_actor:
                     Actor.log.info(f"Fetching page {page_no}: {url[:120]}")
@@ -211,7 +222,7 @@ async def _run(user_input: dict) -> None:
                     # ensure the link is visible (virtual list may place it lower)
                     await next_loc.scroll_into_view_if_needed()
                     # Wait for React hydration to complete before clicking "next"
-                    await page.wait_for_timeout(8000)
+                    await page.wait_for_timeout(5000)
                     await next_loc.click()
                 except Exception as e:
                     if use_actor:
