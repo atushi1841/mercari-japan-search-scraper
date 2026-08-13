@@ -210,6 +210,8 @@ async def _run(user_input: dict) -> None:
                 try:
                     # ensure the link is visible (virtual list may place it lower)
                     await next_loc.scroll_into_view_if_needed()
+                    # Wait for React hydration to complete before clicking "next"
+                    await page.wait_for_timeout(8000)
                     await next_loc.click()
                 except Exception as e:
                     if use_actor:
@@ -220,7 +222,7 @@ async def _run(user_input: dict) -> None:
 
                 # Allow the SPA transition to finish (short timeout, ignore failures)
                 try:
-                    await page.wait_for_load_state("networkidle", timeout=5000)
+                    await page.wait_for_timeout(5000)
                 except Exception:
                     pass
 
