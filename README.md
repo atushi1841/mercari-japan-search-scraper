@@ -54,7 +54,7 @@ $0.00005 per run + $0.002 per item (100 items ≈ $0.20).
 
 ## Limitations
 
-- Mercari actively blocks datacenter IPs on some routes; if your runs return 0 items, enable the Apify proxy or use a residential proxy group.
+- **Proxy**: Do NOT enable the Apify auto-proxy — it causes page-load timeouts. Mercari works directly from Apify datacenter IPs. If you use a proxy, use residential proxies only.
 - Item count is limited by search ranking (Mercari returns up to ~3,400 results per keyword).
 - Images are thumbnail URLs; use the `itemUrl` for full details.
 

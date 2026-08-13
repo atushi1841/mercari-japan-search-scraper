@@ -50,9 +50,9 @@
     "proxyConfiguration": {
       "title": "Proxy Configuration",
       "type": "object",
-      "description": "Proxy for accessing Mercari (recommended for Apify cloud runs)",
+      "description": "IMPORTANT: Mercari works best WITHOUT proxy. Apify auto-proxy causes timeouts. Leave default (disabled) unless you have residential proxies.",
       "editor": "proxy",
-      "prefill": { "useApifyProxy": true }
+      "prefill": { "useApifyProxy": false }
     }
   },
   "required": ["searchKeyword"]
