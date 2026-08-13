@@ -153,7 +153,26 @@ async def _run(user_input: dict) -> None:
                 else:
                     print(f"[INFO] Fetching page {page_no}: {url[:120]}")
 
-                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                if page_no == 1:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                else:
+                    clicked = await page.evaluate(
+                        """() => {
+                            const anchors = [...document.querySelectorAll('a')];
+                            const n = anchors.find(a => (a.textContent || '').trim() === '次へ');
+                            if (n) {
+                                n.click();
+                                return true;
+                            }
+                            return false;
+                        }"""
+                    )
+                    if not clicked:
+                        if use_actor:
+                            Actor.log.info("No 'next' link found; pagination ended")
+                        else:
+                            print("[INFO] No 'next' link found; pagination ended")
+                        break
                 # Wait for the first search API response, then drain extras
                 page_items = []
                 try:
