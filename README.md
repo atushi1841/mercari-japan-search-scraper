@@ -60,4 +60,5 @@ $0.00005 per run + $0.002 per item (100 items ≈ $0.20).
 
 ## Changelog
 
+- **0.1** — Production release. SPA-based pagination (click 次へ + React hydration wait + retry), full-page browsing mode, total-timeout guard. Verified: 359 items / 3 pages, no duplicates.
 - **0.0** — Initial release. Search by keyword, sort, price range; pagination; network-capture based extraction.
