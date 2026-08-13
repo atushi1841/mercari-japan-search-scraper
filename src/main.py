@@ -73,6 +73,56 @@ def _build_search_url(keyword: str, sort: str, price_min: int, price_max: int) -
     return START_URL.format(params=urlencode(params))
 
 
+async def _wait_for_api_response(capture_q, timeout=30.0):
+    """Wait for one search API response and drain further queued responses."""
+    first = await asyncio.wait_for(capture_q.get(), timeout=timeout)
+    items = []
+    for it in (first.get("items") or []):
+        if it.get("id"):
+            items.append(_item_to_output(it))
+    # drain additional queued responses (if any)
+    try:
+        while True:
+            extra = await asyncio.wait_for(capture_q.get(), timeout=3.0)
+            for it in (extra.get("items") or []):
+                if it.get("id"):
+                    items.append(_item_to_output(it))
+    except asyncio.TimeoutError:
+        pass
+    return items
+
+
+async def _click_and_get_items(page, capture_q, use_actor, max_retries=1):
+    """Click 'next', wait for API response; retry once if needed."""
+    for attempt in range(max_retries + 1):
+        try:
+            next_loc = page.locator("a:has-text(\"次へ\")")
+            await next_loc.scroll_into_view_if_needed()
+            # Wait for React hydration before clicking
+            await page.wait_for_timeout(8000)
+            await next_loc.click()
+            # Wait for the resulting search API response
+            items = await _wait_for_api_response(capture_q, timeout=30.0)
+            if use_actor:
+                Actor.log.info(f"Got items from page after click (attempt {attempt + 1})")
+            return items
+        except asyncio.TimeoutError:
+            if use_actor:
+                Actor.log.warning(f"No search API response after click (attempt {attempt + 1})")
+            else:
+                print(f"[WARN] No search API response after click (attempt {attempt + 1})")
+            continue
+        except Exception as e:
+            if use_actor:
+                Actor.log.warning(f"Click/wait error: {e}")
+            else:
+                print(f"[WARN] Click/wait error: {e}")
+            continue
+    if use_actor:
+        Actor.log.warning("All click attempts failed")
+    return None
+
+
 async def _run(user_input: dict) -> None:
     use_actor = Actor is not None and Actor.is_at_home()
 
@@ -183,25 +233,34 @@ async def _run(user_input: dict) -> None:
                 if page_no == 1:
                     # First page: full browser load to obtain initial search session
                     await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                    try:
+                        page_items = await _wait_for_api_response(capture_q, timeout=30.0)
+                    except asyncio.TimeoutError:
+                        if use_actor:
+                            Actor.log.warning(f"No search API response on page {page_no}")
+                            try:
+                                item_count = await page.evaluate("document.querySelectorAll(\"a[href*='/item/']\").length")
+                                current_href = await page.evaluate("location.href")
+                                Actor.log.warning(f"Page {page_no} items (SSR)={item_count} href={current_href}")
+                            except Exception as e:
+                                Actor.log.warning(f"Could not get SSR info: {e}")
+                        else:
+                            print(f"[WARN] No search API response on page {page_no}")
+                        break
+                else:
+                    page_items = await _click_and_get_items(page, capture_q, use_actor)
+                    if page_items is None:
+                        if use_actor:
+                            Actor.log.warning(f"Pagination broken on page {page_no}")
+                        else:
+                            print(f"[WARN] Pagination broken on page {page_no}")
+                        break
 
-                page_items = []
-                try:
-                    first = await asyncio.wait_for(capture_q.get(), timeout=30)
-                    page_items.extend(
-                        _item_to_output(it) for it in (first.get("items") or []) if it.get("id")
-                    )
-                    page_items.extend(await drain(capture_q, timeout=3.0))
-                except asyncio.TimeoutError:
+                if not page_items:
                     if use_actor:
-                        Actor.log.warning(f"No search API response on page {page_no}")
-                        try:
-                            item_count = await page.evaluate("document.querySelectorAll(\"a[href*='/item/']\").length")
-                            current_href = await page.evaluate("location.href")
-                            Actor.log.warning(f"Page {page_no} items (SSR)={item_count} href={current_href}")
-                        except Exception as e:
-                            Actor.log.warning(f"Could not get SSR info: {e}")
+                        Actor.log.info(f"No items returned on page {page_no}, stopping")
                     else:
-                        print(f"[WARN] No search API response on page {page_no}")
+                        print(f"[INFO] No items returned on page {page_no}, stopping")
                     break
 
                 for item in page_items:
@@ -215,35 +274,6 @@ async def _run(user_input: dict) -> None:
 
                 if collected >= max_items or page_no >= max_pages:
                     break
-
-                # Click the "次へ" link for SPA-based navigation
-                next_loc = page.locator("a:has-text(\"次へ\")")
-                try:
-                    # ensure the link is visible (virtual list may place it lower)
-                    await next_loc.scroll_into_view_if_needed()
-                    # Wait for React hydration to complete before clicking "next"
-                    await page.wait_for_timeout(5000)
-                    await next_loc.click()
-                except Exception as e:
-                    if use_actor:
-                        Actor.log.info(f"No 'next' link found or click failed: {e}")
-                    else:
-                        print(f"[INFO] No 'next' link found or click failed: {e}")
-                    break
-
-                # Allow the SPA transition to finish (short timeout, ignore failures)
-                try:
-                    await page.wait_for_timeout(5000)
-                except Exception:
-                    pass
-
-                # Log SPA transition results for debugging
-                if use_actor:
-                    try:
-                        card_count = await page.evaluate("document.querySelectorAll(\"a[href*='/item/']\").length")
-                        Actor.log.info(f"After click: url={page.url}, card_count={card_count}")
-                    except Exception as e:
-                        Actor.log.warning(f"Failed to get after-click debug info: {e}")
 
             if use_actor:
                 Actor.log.info(f"Done. Collected {collected} items from {page_no} page(s).")
