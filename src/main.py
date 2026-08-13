@@ -106,8 +106,10 @@ async def _run(user_input: dict) -> None:
     browser = None
     try:
         async with async_playwright() as pw:
+            # headless=False works under xvfb
             browser = await pw.chromium.launch(
-                headless=True,
+                headless=False,
+                args=["--disable-blink-features=AutomationControlled"],
                 proxy={"server": proxy_url} if proxy_url else None,
             )
             page = await browser.new_page(
@@ -121,6 +123,21 @@ async def _run(user_input: dict) -> None:
             )
 
             capture_q: asyncio.Queue = asyncio.Queue()
+
+            async def on_console(msg):
+                if use_actor:
+                    Actor.log.info(f"[console] {msg.type}: {msg.text}")
+                else:
+                    print(f"[console] {msg.type}: {msg.text}")
+            page.on("console", lambda msg: asyncio.create_task(on_console(msg)))
+
+            async def on_request(req):
+                if "api.mercari.jp" in req.url:
+                    if use_actor:
+                        Actor.log.info(f"[request] {req.method} {req.url}")
+                    else:
+                        print(f"[request] {req.method} {req.url}")
+            page.on("request", lambda req: asyncio.create_task(on_request(req)))
 
             async def on_response(resp):
                 if SEARCH_API_MARKER not in resp.url:
@@ -171,16 +188,36 @@ async def _run(user_input: dict) -> None:
                     page_items.extend(await drain(capture_q, timeout=3.0))
                 except asyncio.TimeoutError:
                     if use_actor:
-                        Actor.log.warning(f"No search API response on page {page_no}")
-                        try:
-                            item_count = await page.evaluate("document.querySelectorAll(\"a[href*='/item/']\").length")
-                            current_href = await page.evaluate("location.href")
-                            Actor.log.warning(f"Page {page_no} items (SSR)={item_count} href={current_href}")
-                        except Exception as e:
-                            Actor.log.warning(f"Could not get SSR info: {e}")
+                        Actor.log.warning(f"No search API response on page {page_no}; trying scroll...")
                     else:
-                        print(f"[WARN] No search API response on page {page_no}")
-                    break
+                        print(f"[WARN] No search API response on page {page_no}; trying scroll...")
+                    try:
+                        for _ in range(3):
+                            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                            await asyncio.sleep(0.5)
+                    except Exception as e:
+                        if use_actor:
+                            Actor.log.warning(f"Scroll failed: {e}")
+                        else:
+                            print(f"[WARN] Scroll failed: {e}")
+                    try:
+                        first = await asyncio.wait_for(capture_q.get(), timeout=10)
+                        page_items.extend(
+                            _item_to_output(it) for it in (first.get("items") or []) if it.get("id")
+                        )
+                        page_items.extend(await drain(capture_q, timeout=3.0))
+                    except asyncio.TimeoutError:
+                        if use_actor:
+                            Actor.log.warning(f"No search API response after scroll on page {page_no}")
+                            try:
+                                item_count = await page.evaluate("document.querySelectorAll(\"a[href*='/item/']\").length")
+                                current_href = await page.evaluate("location.href")
+                                Actor.log.warning(f"Page {page_no} items (SSR)={item_count} href={current_href}")
+                            except Exception as e:
+                                Actor.log.warning(f"Could not get SSR info: {e}")
+                        else:
+                            print(f"[WARN] No search API response after scroll on page {page_no}")
+                        break
 
                 for item in page_items:
                     if collected >= max_items:
