@@ -1,0 +1,29 @@
+{
+  "actorSpecification": 1,
+  "name": "mercari-japan-search-scraper",
+  "title": "Mercari Japan Search Scraper",
+  "description": "Scrape search results from Mercari Japan (メルカリ) including item name, price, condition, brand, thumbnails and item URL.",
+  "version": "0.0",
+  "dockerfile": "./Dockerfile",
+  "input": "./INPUT_SCHEMA.json",
+  "outputSchema": {
+    "actorOutputSchemaVersion": 1,
+    "title": "Mercari Item",
+    "description": "A single Mercari item from search results",
+    "type": "object",
+    "properties": {
+      "id": { "title": "Item ID", "type": "string", "description": "Mercari item ID (m...) or null for ad items", "template": "{{id}}" },
+      "name": { "title": "Item Name", "type": "string", "description": "Item title", "template": "{{name}}" },
+      "price": { "title": "Price (JPY)", "type": "string", "description": "Price in Japanese Yen", "template": "{{price}}" },
+      "status": { "title": "Status", "type": "string", "description": "Sale status (ITEM_STATUS_ON_SALE etc)", "template": "{{status}}" },
+      "condition": { "title": "Condition ID", "type": "string", "description": "Item condition ID (1=new, 5=poor)", "template": "{{condition}}" },
+      "brand": { "title": "Brand", "type": "string", "description": "Brand name if available", "template": "{{brand}}" },
+      "categoryId": { "title": "Category ID", "type": "string", "description": "Mercari category ID", "template": "{{categoryId}}" },
+      "sellerId": { "title": "Seller ID", "type": "string", "description": "Seller account ID", "template": "{{sellerId}}" },
+      "thumbnail": { "title": "Thumbnail URL", "type": "string", "description": "Thumbnail image URL", "template": "{{thumbnail}}" },
+      "itemUrl": { "title": "Item URL", "type": "string", "description": "Link to the item page", "template": "{{itemUrl}}" },
+      "created": { "title": "Created At", "type": "string", "description": "Unix timestamp of listing creation", "template": "{{created}}" }
+    },
+    "required": ["name", "price"]
+  }
+}

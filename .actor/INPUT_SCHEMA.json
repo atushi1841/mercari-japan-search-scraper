@@ -1,0 +1,59 @@
+{
+  "title": "Mercari Japan Search Scraper",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "searchKeyword": {
+      "title": "Search Keyword",
+      "type": "string",
+      "description": "Keyword to search on Mercari (e.g. CBR250RR, iPhone 15, 腕時計)",
+      "editor": "textfield",
+      "prefill": "CBR250RR"
+    },
+    "maxItems": {
+      "title": "Max Items",
+      "type": "integer",
+      "description": "Maximum number of items to scrape (default 100)",
+      "editor": "number",
+      "prefill": 100
+    },
+    "maxPages": {
+      "title": "Max Pages",
+      "type": "integer",
+      "description": "Maximum number of result pages to crawl (default 10, ~120 items/page)",
+      "editor": "number",
+      "prefill": 10
+    },
+    "sort": {
+      "title": "Sort Order",
+      "type": "string",
+      "description": "Sort order for search results",
+      "editor": "select",
+      "enum": ["SORT_SCORE", "SORT_CREATED_TIME", "SORT_UPDATED_TIME", "SORT_PRICE"],
+      "enumTitles": ["Relevance (default)", "Newest", "Recently Updated", "Price"],
+      "prefill": "SORT_SCORE"
+    },
+    "priceMin": {
+      "title": "Min Price (JPY)",
+      "type": "integer",
+      "description": "Minimum price filter in JPY (0 = no limit)",
+      "editor": "number",
+      "prefill": 0
+    },
+    "priceMax": {
+      "title": "Max Price (JPY)",
+      "type": "integer",
+      "description": "Maximum price filter in JPY (0 = no limit)",
+      "editor": "number",
+      "prefill": 0
+    },
+    "proxyConfiguration": {
+      "title": "Proxy Configuration",
+      "type": "object",
+      "description": "Proxy for accessing Mercari (recommended for Apify cloud runs)",
+      "editor": "proxy",
+      "prefill": { "useApifyProxy": true }
+    }
+  },
+  "required": ["searchKeyword"]
+}
