@@ -125,9 +125,15 @@ async def _run(user_input: dict) -> None:
             async def on_response(resp):
                 if SEARCH_API_MARKER not in resp.url:
                     return
+                if use_actor:
+                    Actor.log.info(f"Search API response: {resp.status} {resp.url}")
+                    if resp.status != 200:
+                        Actor.log.warning(f"Search API HTTP {resp.status} for {resp.url}")
                 try:
                     data = await resp.json()
-                except Exception:
+                except Exception as e:
+                    if use_actor:
+                        Actor.log.warning(f"Failed to parse JSON from {resp.url}: {e}")
                     return
                 await capture_q.put(data)
 
@@ -153,30 +159,12 @@ async def _run(user_input: dict) -> None:
                 else:
                     print(f"[INFO] Fetching page {page_no}: {url[:120]}")
 
-                if page_no == 1:
-                    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-                else:
-                    clicked = await page.evaluate(
-                        """() => {
-                            const anchors = [...document.querySelectorAll('a')];
-                            const n = anchors.find(a => (a.textContent || '').trim() === '次へ');
-                            if (n) {
-                                n.click();
-                                return true;
-                            }
-                            return false;
-                        }"""
-                    )
-                    if not clicked:
-                        if use_actor:
-                            Actor.log.info("No 'next' link found; pagination ended")
-                        else:
-                            print("[INFO] No 'next' link found; pagination ended")
-                        break
+                # Navigate using full page load (page.goto) for every page
+                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
                 # Wait for the first search API response, then drain extras
                 page_items = []
                 try:
-                    first = await asyncio.wait_for(capture_q.get(), timeout=25)
+                    first = await asyncio.wait_for(capture_q.get(), timeout=30)
                     page_items.extend(
                         _item_to_output(it) for it in (first.get("items") or []) if it.get("id")
                     )
@@ -184,6 +172,12 @@ async def _run(user_input: dict) -> None:
                 except asyncio.TimeoutError:
                     if use_actor:
                         Actor.log.warning(f"No search API response on page {page_no}")
+                        try:
+                            item_count = await page.evaluate("document.querySelectorAll(\"a[href*='/item/']\").length")
+                            current_href = await page.evaluate("location.href")
+                            Actor.log.warning(f"Page {page_no} items (SSR)={item_count} href={current_href}")
+                        except Exception as e:
+                            Actor.log.warning(f"Could not get SSR info: {e}")
                     else:
                         print(f"[WARN] No search API response on page {page_no}")
                     break
